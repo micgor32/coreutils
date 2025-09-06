@@ -1,15 +1,15 @@
 # spell-checker:ignore bintools gnum gperf ldflags libclang nixpkgs numtide pkgs texinfo gettext
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs";
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
 
     # <https://github.com/nix-systems/nix-systems>
     systems.url = "github:nix-systems/default";
   };
 
-  outputs = inputs: let
-    inherit (inputs.nixpkgs) lib legacyPackages;
-    eachSystem = lib.genAttrs (import inputs.systems);
+  outputs = { self, nixpkgs, systems, ... }: let
+    inherit (nixpkgs) lib legacyPackages;
+    eachSystem = lib.genAttrs (import systems);
     pkgsFor = legacyPackages;
   in {
     devShells = eachSystem (
@@ -71,5 +71,41 @@
         };
       }
     );
+    packages = eachSystem (system:
+      let
+        pkgs = pkgsFor.${system};
+       
+        libselinuxPath = pkgs.lib.makeLibraryPath [ pkgs.libselinux ];
+        libaclPath     = pkgs.lib.makeLibraryPath [ pkgs.acl ];
+
+        src = ./.;
+      in
+      {
+        coreutils = pkgs.rustPlatform.buildRustPackage {
+        pname = "coreutils";
+        version = "0.1.0";
+
+        inherit src;
+        buildInputs = [ pkgs.libselinux pkgs.acl ];
+
+        cargoLock.lockFile = ./Cargo.lock;
+        cargoBuildFlags = [
+          "--features"
+          "unix"
+        ];
+        cargoTestFlags = [
+          # For the time being I do not know how to make tests working in the sandbox
+          # thus the tests are disabled.
+          "--no-run"
+        ];
+        RUSTFLAGS = [
+          "-L ${libselinuxPath}"
+          "-L ${libaclPath}"
+        ];
+    
+      };
+    }
+  );
+  defaultPackage = eachSystem (system: self.packages.${system}.coreutils);
   };
 }
